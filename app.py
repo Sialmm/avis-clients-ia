@@ -104,14 +104,23 @@ with c2:
         width="stretch",
     )
 
-st.subheader("Évolution de la note moyenne par semaine")
-hebdo = (df.dropna(subset=["date"]).set_index("date").groupby("restaurant")["note"]
-         .resample("W").mean().reset_index())
-st.altair_chart(
-    alt.Chart(hebdo).mark_line(point=True).encode(
-        x=alt.X("date:T", title=None), y=alt.Y("note:Q", scale=alt.Scale(domain=[1, 5])), color="restaurant:N"),
-    width="stretch",
-)
+st.subheader("Évolution de la note moyenne par semaine (depuis 2026)")
+recents = df[df["date"] >= pd.Timestamp("2026-01-01")].dropna(subset=["date"])
+if recents.empty:
+    st.info("Aucun avis publié depuis le 1er janvier 2026.")
+else:
+    hebdo = (recents.set_index("date").groupby("restaurant")["note"]
+             .resample("W").mean().dropna().reset_index())
+    st.altair_chart(
+        alt.Chart(hebdo).mark_line(point=True).encode(
+            x=alt.X("date:T", title=None, axis=alt.Axis(format="%d %b")),
+            y=alt.Y("note:Q", title="Note moyenne", scale=alt.Scale(domain=[1, 5])),
+            color=alt.Color("restaurant:N", title=None),
+            tooltip=[alt.Tooltip("restaurant:N"), alt.Tooltip("date:T", format="%d/%m/%Y"),
+                     alt.Tooltip("note:Q", format=".1f")],
+        ),
+        width="stretch",
+    )
 
 st.subheader("Avis urgents à traiter")
 st.dataframe(
