@@ -47,13 +47,19 @@
             {
               "id": "c1",
               "name": "searchQuery",
-              "value": "Matsuri restaurant",
+              "value": "Matsuri restaurant japonais France",
               "type": "string"
             },
             {
               "id": "c2",
               "name": "nameFilter",
               "value": "matsuri",
+              "type": "string"
+            },
+            {
+              "id": "c4",
+              "name": "pays",
+              "value": "France",
               "type": "string"
             },
             {
@@ -91,7 +97,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ textQuery: $json.searchQuery, languageCode: \"fr\", maxResultCount: 20 }) }}",
+        "jsonBody": "={{ JSON.stringify({ textQuery: $json.searchQuery, languageCode: \"fr\", regionCode: \"FR\", maxResultCount: 20 }) }}",
         "options": {}
       }
     },
@@ -104,7 +110,7 @@
         96
       ],
       "parameters": {
-        "jsCode": "// Transforme la réponse Google Places en un item par avis\nconst cfg = $('Config').first().json;\nconst filtre = (cfg.nameFilter || '').toLowerCase();\nconst places = $input.first().json.places || [];\nconst out = [];\nfor (const p of places) {\n  const nom = p.displayName?.text || 'Inconnu';\n  if (filtre && !nom.toLowerCase().includes(filtre)) continue;\n  for (const r of (p.reviews || [])) {\n    const texte = r.text?.text || r.originalText?.text || '';\n    if (!texte.trim()) continue; // on ignore les avis sans texte\n    out.push({ json: {\n      review_id: r.name,\n      date: (r.publishTime || '').slice(0, 10),\n      restaurant: nom,\n      adresse: p.formattedAddress || '',\n      note: r.rating ?? null,\n      auteur: r.authorAttribution?.displayName || '',\n      avis: texte,\n    }});\n  }\n}\nreturn out;"
+        "jsCode": "// Transforme la réponse Google Places en un item par avis\nconst cfg = $('Config').first().json;\nconst filtre = (cfg.nameFilter || '').toLowerCase();\nconst pays = (cfg.pays || '').toLowerCase();\nconst places = $input.first().json.places || [];\nconst out = [];\nfor (const p of places) {\n  const nom = p.displayName?.text || 'Inconnu';\n  const adresse = p.formattedAddress || '';\n  if (filtre && !nom.toLowerCase().includes(filtre)) continue;\n  if (pays && !adresse.toLowerCase().endsWith(pays)) continue;\n  for (const r of (p.reviews || [])) {\n    const texte = r.text?.text || r.originalText?.text || '';\n    if (!texte.trim()) continue; // on ignore les avis sans texte\n    out.push({ json: {\n      review_id: r.name,\n      date: (r.publishTime || '').slice(0, 10),\n      restaurant: nom,\n      adresse: adresse,\n      note: r.rating ?? null,\n      auteur: r.authorAttribution?.displayName || '',\n      avis: texte,\n    }});\n  }\n}\nreturn out;"
       }
     },
     {
