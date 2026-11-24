@@ -1,7 +1,5 @@
 """Dashboard Streamlit : suivi des avis clients classés par IA (alimenté par le workflow n8n)."""
 import os
-import random
-from datetime import date, timedelta
 
 import altair as alt
 import pandas as pd
@@ -9,29 +7,6 @@ import streamlit as st
 
 st.set_page_config(page_title="Avis clients IA", page_icon="🍣", layout="wide")
 st.title("Analyse des avis clients par IA")
-
-
-def demo_data(n: int = 120) -> pd.DataFrame:
-    """Données FICTIVES pour tester le dashboard sans clé API."""
-    random.seed(0)
-    restos = ["Restaurant Démo 1", "Restaurant Démo 2", "Restaurant Démo 3"]
-    themes = ["service", "attente", "qualite", "prix", "livraison", "proprete", "ambiance"]
-    rows = []
-    for i in range(n):
-        note = random.choices([1, 2, 3, 4, 5], weights=[1, 1, 2, 4, 5])[0]
-        sentiment = "negatif" if note <= 2 else "neutre" if note == 3 else "positif"
-        rows.append({
-            "review_id": f"demo-{i}",
-            "date": (date.today() - timedelta(days=random.randint(0, 90))).isoformat(),
-            "restaurant": random.choice(restos),
-            "note": note,
-            "sentiment": sentiment,
-            "score": {1: -2, 2: -1, 3: 0, 4: 1, 5: 2}[note],
-            "themes": ", ".join(random.sample(themes, k=random.randint(1, 2))),
-            "urgence": "haute" if note == 1 and random.random() < 0.5 else "basse",
-            "resume": "Avis fictif de démonstration",
-        })
-    return pd.DataFrame(rows)
 
 
 @st.cache_data(ttl=600)
@@ -44,8 +19,7 @@ try:
     sheet_id = st.secrets.get("SHEET_ID", os.getenv("SHEET_ID", ""))
 except Exception:  # pas de fichier secrets.toml
     sheet_id = os.getenv("SHEET_ID", "")
-source = st.sidebar.radio("Source", ["Google Sheet", "Fichier CSV", "Démo (données fictives)"],
-                          index=0 if sheet_id else 2)
+source = st.sidebar.radio("Source", ["Google Sheet", "Fichier CSV"])
 
 if source == "Google Sheet":
     sheet_id = st.sidebar.text_input("ID du Google Sheet", sheet_id)
@@ -53,14 +27,11 @@ if source == "Google Sheet":
         st.info("Renseigne l'ID du Google Sheet (partagé en lecture via le lien).")
         st.stop()
     df = load(f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=Avis")
-elif source == "Fichier CSV":
+else:
     f = st.sidebar.file_uploader("Export CSV de l'onglet Avis", type="csv")
     if not f:
         st.stop()
     df = pd.read_csv(f)
-else:
-    st.warning("Mode démo : données fictives générées pour illustrer le dashboard.")
-    df = demo_data()
 
 df["date"] = pd.to_datetime(df["date"], errors="coerce")
 df["note"] = pd.to_numeric(df["note"], errors="coerce")

@@ -41,7 +41,7 @@ review_id | date | restaurant | adresse | note | auteur | avis | sentiment | sco
 pip install -r requirements.txt
 streamlit run app.py
 ```
-Partage le Sheet en lecture (« toute personne disposant du lien ») et colle son ID dans la barre latérale, ou définis `SHEET_ID` dans `.streamlit/secrets.toml`. Un **mode démo** avec des données fictives permet de tester sans clé API.
+Partage le Sheet en lecture (« toute personne disposant du lien ») et colle son ID dans la barre latérale, ou définis `SHEET_ID` dans `.streamlit/secrets.toml`.
 
 ## Limites
 - Tous les avis sont classés en **une seule requête** au LLM, pour rester dans le quota gratuit de Gemini (environ 20 requêtes par jour).
