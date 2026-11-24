@@ -109,6 +109,17 @@ recents = df[df["date"] >= pd.Timestamp("2026-01-01")].dropna(subset=["date"])
 if recents.empty:
     st.info("Aucun avis publié depuis le 1er janvier 2026.")
 else:
+    choix_resto = st.selectbox(
+        "Restaurant à afficher",
+        ["Tous les restaurants"] + sorted(recents["restaurant"].unique()),
+        key="resto_courbe",
+    )
+    if choix_resto != "Tous les restaurants":
+        recents = recents[recents["restaurant"] == choix_resto]
+        c_a, c_b, c_c = st.columns(3)
+        c_a.metric("Avis depuis 2026", len(recents))
+        c_b.metric("Note moyenne", f"{recents['note'].mean():.2f} / 5")
+        c_c.metric("Avis négatifs", f"{(recents['sentiment'] == 'negatif').mean():.0%}")
     hebdo = (recents.set_index("date").groupby("restaurant")["note"]
              .resample("W").mean().dropna().reset_index())
     st.altair_chart(
