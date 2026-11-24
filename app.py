@@ -45,12 +45,20 @@ if df.empty:
     st.info("Aucun avis pour cette sélection.")
     st.stop()
 
+# --- Sujets récurrents : un même thème négatif cité plusieurs fois pour un restaurant ---
+SEUIL_RECURRENCE = 2
+negatifs = df[df["sentiment"] == "negatif"].copy()
+sujets = (negatifs.assign(theme=negatifs["themes"].str.split(", ")).explode("theme")
+          .query("theme != ''").groupby(["restaurant", "theme"])
+          .agg(avis=("review_id", "count"), dernier=("date", "max")).reset_index())
+recurrents = sujets[sujets["avis"] >= SEUIL_RECURRENCE].sort_values("avis", ascending=False)
+
 # --- KPIs ---------------------------------------------------------------------
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("Avis analysés", len(df))
 k2.metric("Note moyenne", f"{df['note'].mean():.2f} / 5")
 k3.metric("Avis négatifs", f"{(df['sentiment'] == 'negatif').mean():.0%}")
-k4.metric("Urgents", int((df["urgence"] == "haute").sum()))
+k4.metric("Sujets récurrents", len(recurrents), help="Thème négatif cité dans au moins 2 avis du même restaurant")
 
 # --- Graphiques ---------------------------------------------------------------
 c1, c2 = st.columns(2)
@@ -104,9 +112,24 @@ else:
         width="stretch",
     )
 
-st.subheader("Avis urgents à traiter")
-st.dataframe(
-    df[df["urgence"] == "haute"].sort_values("date", ascending=False)
-    [["date", "restaurant", "note", "themes", "resume"]],
-    width="stretch", hide_index=True,
-)
+st.subheader("Points d'amélioration")
+st.caption("Un avis négatif isolé n'est pas forcément représentatif. "
+           "On met en avant les sujets qui reviennent dans plusieurs avis d'un même restaurant.")
+if recurrents.empty:
+    st.success("Aucun sujet négatif récurrent : les critiques sont isolées.")
+else:
+    st.dataframe(
+        recurrents.rename(columns={"restaurant": "Restaurant", "theme": "Sujet",
+                                   "avis": "Avis négatifs", "dernier": "Dernier avis"}),
+        width="stretch", hide_index=True,
+        column_config={"Dernier avis": st.column_config.DateColumn(format="DD/MM/YYYY")},
+    )
+
+with st.expander(f"Avis négatifs à prendre en compte ({len(negatifs)})"):
+    st.dataframe(
+        negatifs.sort_values("date", ascending=False)[["date", "restaurant", "note", "themes", "resume"]]
+        .rename(columns={"date": "Date", "restaurant": "Restaurant", "note": "Note",
+                         "themes": "Sujets", "resume": "Résumé"}),
+        width="stretch", hide_index=True,
+        column_config={"Date": st.column_config.DateColumn(format="DD/MM/YYYY")},
+    )

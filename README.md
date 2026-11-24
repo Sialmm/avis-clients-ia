@@ -12,7 +12,7 @@ Chaque lundi 8h (n8n)
   → Code : un item par avis, puis regroupement en une seule liste
   → LLM (Gemini, 1 seule requête) : sentiment, thèmes, urgence, résumé de chaque avis (JSON structuré)
   ├→ Google Sheets : historique des avis (sans doublon, clé = review_id)
-  └→ Stats des 7 derniers jours → LLM : 3 actions prioritaires → mail HTML aux managers
+  └→ Stats des 7 derniers jours → sujets récurrents + LLM : pistes d'amélioration → mail HTML aux managers
 
 Dashboard Streamlit ← lit le Google Sheet
 ```
