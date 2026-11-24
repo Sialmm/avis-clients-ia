@@ -1,0 +1,584 @@
+{
+  "name": "Analyse automatisée d'avis clients par IA",
+  "nodes": [
+    {
+      "name": "Chaque lundi 8h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Lancer à la main",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        208
+      ],
+      "parameters": {}
+    },
+    {
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        224,
+        96
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "searchQuery",
+              "value": "Matsuri restaurant",
+              "type": "string"
+            },
+            {
+              "id": "c2",
+              "name": "nameFilter",
+              "value": "matsuri",
+              "type": "string"
+            },
+            {
+              "id": "c3",
+              "name": "managerEmail",
+              "value": "ton.email@exemple.fr",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "name": "Google Places - avis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        448,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://places.googleapis.com/v1/places:searchText",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Goog-FieldMask",
+              "value": "places.id,places.displayName,places.formattedAddress,places.rating,places.reviews"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ textQuery: $json.searchQuery, languageCode: \"fr\", maxResultCount: 20 }) }}",
+        "options": {}
+      }
+    },
+    {
+      "name": "Extraire les avis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        96
+      ],
+      "parameters": {
+        "jsCode": "// Transforme la réponse Google Places en un item par avis\nconst cfg = $('Config').first().json;\nconst filtre = (cfg.nameFilter || '').toLowerCase();\nconst places = $input.first().json.places || [];\nconst out = [];\nfor (const p of places) {\n  const nom = p.displayName?.text || 'Inconnu';\n  if (filtre && !nom.toLowerCase().includes(filtre)) continue;\n  for (const r of (p.reviews || [])) {\n    const texte = r.text?.text || r.originalText?.text || '';\n    if (!texte.trim()) continue; // on ignore les avis sans texte\n    out.push({ json: {\n      review_id: r.name,\n      date: (r.publishTime || '').slice(0, 10),\n      restaurant: nom,\n      adresse: p.formattedAddress || '',\n      note: r.rating ?? null,\n      auteur: r.authorAttribution?.displayName || '',\n      avis: texte,\n    }});\n  }\n}\nreturn out;"
+      }
+    },
+    {
+      "name": "Regrouper les avis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        96
+      ],
+      "parameters": {
+        "jsCode": "const avis = $input.all().map((it, i) => '[' + i + '] Restaurant : ' + it.json.restaurant + ' | Note : ' + it.json.note + '/5 | Avis : ' + String(it.json.avis).replace(/\\s+/g, ' '));\nreturn [{ json: { nb: avis.length, listeAvis: avis.join('\\n') } }];"
+      }
+    },
+    {
+      "name": "IA - classer les avis",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1088,
+        96
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "=Voici {{ $json.nb }} avis numérotés :\n{{ $json.listeAvis }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "type": "SystemMessagePromptTemplate",
+              "message": "Tu analyses des avis clients de restaurants. Pour CHAQUE avis numéroté, renvoie un objet dans la liste \"avis\" avec : id (le numéro entre crochets), sentiment (positif, neutre ou negatif), score (entier de -2 à 2), themes (liste parmi : service, attente, qualite, prix, livraison, proprete, ambiance, autre), urgence (haute, moyenne ou basse ; haute = hygiène, santé, client très mécontent ou erreur grave) et resume (une phrase de 15 mots maximum, en français). N'oublie aucun avis."
+            }
+          ]
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "name": "Gemini (classification)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1040,
+        320
+      ],
+      "parameters": {
+        "modelName": "models/gemini-3-flash-preview",
+        "options": {
+          "temperature": 0,
+          "maxOutputTokens": 16000
+        }
+      }
+    },
+    {
+      "name": "Format de sortie",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1216,
+        320
+      ],
+      "parameters": {
+        "jsonSchemaExample": "{ \"avis\": [ { \"id\": 0, \"sentiment\": \"negatif\", \"score\": -1, \"themes\": [\"attente\", \"service\"], \"urgence\": \"moyenne\", \"resume\": \"Attente trop longue malgré un service aimable\" } ] }"
+      }
+    },
+    {
+      "name": "Fusionner avis + IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        96
+      ],
+      "parameters": {
+        "jsCode": "const res = ($input.first().json.output && $input.first().json.output.avis) || [];\nconst parId = {};\nfor (const c of res) parId[c.id] = c;\nconst today = new Date().toISOString().slice(0, 10);\nreturn $('Extraire les avis').all().map((it, i) => {\n  const c = parId[i] || {};\n  return { json: {\n    ...it.json,\n    sentiment: c.sentiment || '',\n    score: c.score ?? '',\n    themes: Array.isArray(c.themes) ? c.themes.join(', ') : (c.themes || ''),\n    urgence: c.urgence || '',\n    resume: c.resume || '',\n    traite_le: today\n  }};\n});"
+      }
+    },
+    {
+      "name": "Google Sheets - historique",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1648,
+        0
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": "Avis clients IA"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Avis"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "review_id"
+          ],
+          "schema": [
+            {
+              "id": "review_id",
+              "displayName": "review_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "restaurant",
+              "displayName": "restaurant",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "adresse",
+              "displayName": "adresse",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "note",
+              "displayName": "note",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "auteur",
+              "displayName": "auteur",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "avis",
+              "displayName": "avis",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sentiment",
+              "displayName": "sentiment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "themes",
+              "displayName": "themes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "urgence",
+              "displayName": "urgence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resume",
+              "displayName": "resume",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "traite_le",
+              "displayName": "traite_le",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "name": "Statistiques semaine",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1648,
+        224
+      ],
+      "parameters": {
+        "jsCode": "// Statistiques des 7 derniers jours pour le rapport\nconst limite = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);\nconst semaine = $input.all().map(i => i.json).filter(a => a.date >= limite);\nconst parResto = {};\nfor (const a of semaine) {\n  const r = parResto[a.restaurant] ||= { n: 0, notes: 0, negatifs: 0 };\n  r.n++; r.notes += Number(a.note) || 0; if (a.sentiment === 'negatif') r.negatifs++;\n}\nconst lignes = Object.entries(parResto).map(([nom, r]) =>\n  `<tr><td>${nom}</td><td>${r.n}</td><td>${(r.notes / r.n).toFixed(1)}</td><td>${r.negatifs}</td></tr>`).join('');\nconst urgents = semaine.filter(a => a.urgence === 'haute');\nconst aTraiter = semaine.filter(a => a.sentiment !== 'positif')\n  .map(a => `- ${a.restaurant} (${a.note}/5, thèmes : ${a.themes}) : ${a.resume}`).join('\\n');\nreturn [{ json: {\n  nb: semaine.length,\n  tableau: lignes,\n  urgentsHtml: urgents.map(a => `<li><b>${a.restaurant}</b> (${a.note}/5) : ${a.resume}</li>`).join(''),\n  promptIA: aTraiter || 'Aucun avis négatif ou neutre cette semaine.',\n}}];"
+      }
+    },
+    {
+      "name": "IA - priorités de la semaine",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1872,
+        224
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "=Avis de la semaine à traiter :\n{{ $json.promptIA }}",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "SystemMessagePromptTemplate",
+              "message": "Tu es consultant pour une chaîne de restaurants. À partir des avis de la semaine, donne les 3 actions prioritaires et concrètes pour les managers. Réponds uniquement en HTML simple : une liste <ul> de 3 <li>, chacune avec le restaurant concerné et l'action. S'il n'y a aucun avis négatif, félicite l'équipe en une phrase dans un <p>."
+            }
+          ]
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "name": "Gemini (rapport)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1872,
+        448
+      ],
+      "parameters": {
+        "modelName": "models/gemini-3-flash-preview",
+        "options": {
+          "temperature": 0.3
+        }
+      }
+    },
+    {
+      "name": "Construire le mail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2096,
+        224
+      ],
+      "parameters": {
+        "jsCode": "const s = $('Statistiques semaine').first().json;\nconst priorites = ($input.first().json.text || '').replace(/```html|```/g, '');\nlet html = '<h2>Rapport hebdomadaire des avis clients</h2>';\nhtml += '<p>' + s.nb + ' avis publiés ces 7 derniers jours.</p>';\nhtml += '<table border=\"1\" cellpadding=\"6\" style=\"border-collapse:collapse\"><tr><th>Restaurant</th><th>Avis</th><th>Note moyenne</th><th>Négatifs</th></tr>' + s.tableau + '</table>';\nhtml += '<h3>Actions prioritaires (IA)</h3>' + priorites;\nif (s.urgentsHtml) html += '<h3>Avis urgents à traiter</h3><ul>' + s.urgentsHtml + '</ul>';\nreturn [{ json: { html } }];"
+      }
+    },
+    {
+      "name": "Envoyer aux managers",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2320,
+        224
+      ],
+      "parameters": {
+        "sendTo": "={{ $('Config').first().json.managerEmail }}",
+        "subject": "=Avis clients - semaine du {{ $now.minus({ days: 7 }).toFormat('dd/MM') }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Chaque lundi 8h": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lancer à la main": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Google Places - avis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Places - avis": {
+      "main": [
+        [
+          {
+            "node": "Extraire les avis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraire les avis": {
+      "main": [
+        [
+          {
+            "node": "Regrouper les avis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Regrouper les avis": {
+      "main": [
+        [
+          {
+            "node": "IA - classer les avis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IA - classer les avis": {
+      "main": [
+        [
+          {
+            "node": "Fusionner avis + IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fusionner avis + IA": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - historique",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Statistiques semaine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Statistiques semaine": {
+      "main": [
+        [
+          {
+            "node": "IA - priorités de la semaine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IA - priorités de la semaine": {
+      "main": [
+        [
+          {
+            "node": "Construire le mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Construire le mail": {
+      "main": [
+        [
+          {
+            "node": "Envoyer aux managers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini (classification)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "IA - classer les avis",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format de sortie": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "IA - classer les avis",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini (rapport)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "IA - priorités de la semaine",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
